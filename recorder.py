@@ -23,6 +23,7 @@ class AudioRecorder:
         self.sample_rate = AUDIO_SAMPLE_RATE
         self.channels = AUDIO_CHANNELS
         self.output_dir = output_dir
+        self.device_index: int | None = None
         self._frames: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
         self._last_status: str | None = None
@@ -46,7 +47,9 @@ class AudioRecorder:
             self.output_dir.mkdir(parents=True, exist_ok=True)
             self._frames = []
             self._last_status = None
+            self.device_index = _find_input_device_index()
             self._stream = sd.InputStream(
+                device=self.device_index,
                 samplerate=self.sample_rate,
                 channels=self.channels,
                 dtype="float32",
@@ -114,3 +117,35 @@ class AudioRecorder:
             if not candidate.exists():
                 return candidate
             counter += 1
+
+
+def _find_input_device_index() -> int:
+    try:
+        default_input = sd.query_devices(kind="input")
+        default_index = _device_index_from_info(default_input)
+        if default_index is not None:
+            return default_index
+    except Exception:
+        pass
+
+    devices = sd.query_devices()
+    input_devices: list[tuple[int, str]] = []
+    for index, device in enumerate(devices):
+        if int(device.get("max_input_channels", 0)) > 0:
+            input_devices.append((index, str(device.get("name", "Unknown device"))))
+
+    if input_devices:
+        return input_devices[0][0]
+
+    raise RecorderError(
+        "No microphone input device was found. Please connect or enable a microphone "
+        "and set it as the default Windows input device."
+    )
+
+
+def _device_index_from_info(device_info: Any) -> int | None:
+    index = device_info.get("index") if isinstance(device_info, dict) else None
+    if isinstance(index, int) and index >= 0:
+        return index
+
+    return None
